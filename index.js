@@ -9,7 +9,7 @@ const config = {
     channelId: process.env.CHANNEL_ID,          // или числовой ID: -1001234567890
     secretLink: process.env.SECRET_LINK || 'https://example.com/bonus',
     port: process.env.PORT || 3000,
-    webhookUrl: process.env.WEBHOOK_URL || null  // для bothost.ru не обязателен
+    webhookUrl: process.env.WEBHOOK_URL || null
 };
 
 // Проверка наличия токена
@@ -25,14 +25,10 @@ if (!config.channelName && !config.channelId) {
 
 // ==================== ИНИЦИАЛИЗАЦИЯ БОТА ====================
 let bot;
-
-// Bothost.ru поддерживает polling (самый простой способ)
 bot = new TelegramBot(config.botToken, { polling: true });
 console.log('✅ Бот запущен в режиме polling');
 
-// ==================== ХРАНЕНИЕ ДАННЫХ (опционально) ====================
-// Простое in-memory хранилище (при перезапуске сбрасывается)
-// Для продакшена лучше использовать Redis или базу данных
+// ==================== ХРАНЕНИЕ ДАННЫХ ====================
 const userStates = new Map(); // userId -> { status, attempts }
 
 // ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
@@ -51,12 +47,10 @@ function formatUserName(from) {
  */
 async function checkSubscription(userId) {
     try {
-        // Определяем идентификатор канала (приоритет у channelId)
         const chatId = config.channelId || config.channelName;
         
         const chatMember = await bot.getChatMember(chatId, userId);
         
-        // Статусы подписки: creator, administrator, member, restricted
         const subscribed = ['creator', 'administrator', 'member', 'restricted'].includes(chatMember.status);
         
         console.log(`📊 Проверка пользователя ${userId}: статус ${chatMember.status} -> ${subscribed ? '✅ подписан' : '❌ не подписан'}`);
@@ -65,7 +59,6 @@ async function checkSubscription(userId) {
     } catch (error) {
         console.error('❌ Ошибка проверки подписки:', error.message);
         
-        // Детальная диагностика ошибок
         if (error.message.includes('chat not found')) {
             console.error('⚠️ Канал не найден. Проверьте CHANNEL_NAME или CHANNEL_ID');
         } else if (error.message.includes('bot is not a member')) {
@@ -164,9 +157,6 @@ bot.on('callback_query', async (query) => {
         let userState = userStates.get(userId) || { attempts: 0 };
         userState.attempts++;
         userStates.set(userId, userState);
-        
-        // Отправляем сообщение о процессе (опционально)
-        await bot.sendMessage(chatId, '⏳ Проверяю подписку...');
         
         // Проверяем подписку
         const isSubscribed = await checkSubscription(userId);
