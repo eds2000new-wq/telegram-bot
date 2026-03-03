@@ -1,7 +1,7 @@
 {
-  "name": "telegram-sub-bot",
+  "name": "telegram-channel-bot",
   "version": "1.0.0",
-  "description": "Telegram bot for subscription check",
+  "description": "Bot for channel with admin support",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
