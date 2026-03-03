@@ -1,7 +1,7 @@
 {
-  "name": "telegram-channel-bot",
+  "name": "support-bot",
   "version": "1.0.0",
-  "description": "Bot for channel with admin support",
+  "description": "Support bot for Telegram",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
