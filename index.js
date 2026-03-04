@@ -6,8 +6,8 @@ require('dotenv').config();
 const config = {
     botToken: process.env.SUPPORT_BOT_TOKEN,
     adminGroupId: process.env.ADMIN_GROUP_ID ? parseInt(process.env.ADMIN_GROUP_ID) : null,
-    port: process.env.PORT || 3000,
-    welcomeMessage: process.env.WELCOME_MESSAGE || '👋 Здравствуйте! Напишите ваш вопрос.'
+    channelLink: process.env.CHANNEL_LINK || 'https://t.me/testkafe',
+    port: process.env.PORT || 3000
 };
 
 // Проверка наличия токена
@@ -26,16 +26,9 @@ const bot = new TelegramBot(config.botToken, { polling: true });
 console.log('✅ Бот поддержки запущен в режиме polling');
 
 // ==================== ХРАНЕНИЕ ДАННЫХ ====================
-// Связь между сообщениями в группе админов и пользователями
-// adminMessageId -> { userId, userName, originalUserMessageId }
-const adminReplies = new Map();
-
-// Информация о пользователях
-// userId -> { chatId, userName, lastMessage }
-const userChats = new Map();
-
-// Кэш ID админов (загружается из группы)
-let adminIds = new Set();
+const userChats = new Map(); // userId -> { chatId, userName, source }
+const adminReplies = new Map(); // adminMessageId -> userId
+let adminIds = new Set(); // Кэш ID админов
 
 // ==================== ЗАГРУЗКА АДМИНОВ ИЗ ГРУППЫ ====================
 async function loadAdminsFromGroup() {
@@ -74,206 +67,109 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     const userName = formatUserName(msg.from);
-    const startParam = match[1] || '';
+    const startParam = match[1] || ''; // Параметр после /start
     
-    console.log(`👤 Пользователь ${userName} (${userId}) начал диалог с ботом, param: ${startParam}`);
+    console.log(`👤 Пользователь ${userName} (${userId}) запустил бота с параметром: "${startParam}"`);
     
     // Сохраняем информацию о пользователе
     userChats.set(userId, {
         chatId: chatId,
         userName: userName,
-        firstContact: new Date().toISOString()
+        firstContact: new Date().toISOString(),
+        source: startParam || 'direct'
     });
     
-    // Отправляем приветствие
-    await bot.sendMessage(chatId, config.welcomeMessage, {
-        reply_markup: {
-            inline_keyboard: [[
-                { text: "✏️ Написать сообщение", callback_data: "new_message" }
-            ]]
-        }
-    });
-});
-
-// ==================== ОБРАБОТКА КНОПОК ====================
-bot.on('callback_query', async (query) => {
-    const chatId = query.message.chat.id;
-    const messageId = query.message.message_id;
-    const data = query.data;
+    // ===== РАЗНЫЕ СЦЕНАРИИ В ЗАВИСИМОСТИ ОТ ПАРАМЕТРА =====
     
-    await bot.answerCallbackQuery(query.id);
-    
-    if (data === 'new_message') {
-        await bot.editMessageText(
-            '✏️ Напишите ваше сообщение. Я передам его администратору.',
+    // СЦЕНАРИЙ 1: Пришли по QR-коду (параметр qr или channel)
+    if (startParam === 'qr' || startParam === 'channel' || startParam === 'help') {
+        await bot.sendMessage(chatId, 
+            `👋 <b>Добро пожаловать!</b>\n\n` +
+            `Вы перешли по QR-коду из нашего канала. Вот как получить бонус:\n\n` +
+            `1️⃣ <b>Подпишитесь на канал</b> 👇 (кнопка ниже)\n` +
+            `2️⃣ <b>Вернитесь в этот чат</b>\n` +
+            `3️⃣ <b>Нажмите "ПРОВЕРИТЬ ПОДПИСКУ"</b>\n\n` +
+            `После проверки вы получите эксклюзивный бонус! 🎁`,
             {
-                chat_id: chatId,
-                message_id: messageId,
-                parse_mode: 'HTML'
+                parse_mode: 'HTML',
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            { text: "📢 ПЕРЕЙТИ В КАНАЛ", url: config.channelLink }
+                        ],
+                        [
+                            { text: "✅ ПРОВЕРИТЬ ПОДПИСКУ", callback_data: "check_sub" },
+                            { text: "📞 СВЯЗАТЬСЯ С АДМИНОМ", callback_data: "contact_admin" }
+                        ]
+                    ]
+                }
+            }
+        );
+    }
+    
+    // СЦЕНАРИЙ 2: Пришли по приглашению от друга (параметр invite)
+    else if (startParam === 'invite' || startParam === 'friend') {
+        await bot.sendMessage(chatId,
+            `👋 <b>Привет!</b>\n\n` +
+            `Вас пригласили в наш канал. Здесь мы публикуем акции и новости.\n\n` +
+            `👇 Подпишитесь и получайте бонусы!`,
+            {
+                parse_mode: 'HTML',
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            { text: "📢 ПОДПИСАТЬСЯ", url: config.channelLink }
+                        ],
+                        [
+                            { text: "✅ ПРОВЕРИТЬ ПОДПИСКУ", callback_data: "check_sub" }
+                        ]
+                    ]
+                }
+            }
+        );
+    }
+    
+    // СЦЕНАРИЙ 3: Обычный старт (без параметра)
+    else {
+        await bot.sendMessage(chatId,
+            `👋 <b>Здравствуйте, ${userName}!</b>\n\n` +
+            `Это официальный бот канала. Здесь вы можете:\n` +
+            `• ✅ Проверить подписку и получить бонус\n` +
+            `• 📞 Связаться с администратором\n\n` +
+            `👇 Выберите действие:`,
+            {
+                parse_mode: 'HTML',
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            { text: "✅ ПРОВЕРИТЬ ПОДПИСКУ", callback_data: "check_sub" },
+                            { text: "📞 СВЯЗАТЬСЯ С АДМИНОМ", callback_data: "contact_admin" }
+                        ]
+                    ]
+                }
             }
         );
     }
 });
 
-// ==================== ОСНОВНОЙ ОБРАБОТЧИК СООБЩЕНИЙ ====================
-bot.on('message', async (msg) => {
-    // Игнорируем команды
-    if (msg.text && msg.text.startsWith('/')) return;
+// ==================== ОБРАБОТКА CALLBACK-КНОПОК ====================
+bot.on('callback_query', async (query) => {
+    const chatId = query.message.chat.id;
+    const messageId = query.message.message_id;
+    const userId = query.from.id;
+    const userName = formatUserName(query.from);
+    const data = query.data;
     
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    const userName = formatUserName(msg.from);
+    await bot.answerCallbackQuery(query.id);
     
-    // ===== ЕСЛИ СООБЩЕНИЕ ИЗ ГРУППЫ АДМИНОВ =====
-    if (chatId === config.adminGroupId) {
-        // Проверяем, является ли это ответом на другое сообщение
-        if (!msg.reply_to_message) {
-            console.log('⚠️ Сообщение от админа без reply, игнорируем');
-            return;
-        }
+    if (data === 'check_sub') {
+        console.log(`🔍 Пользователь ${userName} (${userId}) проверяет подписку`);
+        // Здесь логика проверки подписки
+        await bot.sendMessage(chatId, '✅ Проверка подписки... (функция в разработке)');
         
-        const originalMsgId = msg.reply_to_message.message_id;
-        const userData = adminReplies.get(originalMsgId);
-        
-        if (!userData) {
-            console.log('⚠️ Неизвестное исходное сообщение, ID:', originalMsgId);
-            await bot.sendMessage(chatId, '❌ Не могу найти пользователя для этого сообщения.', {
-                reply_to_message_id: msg.message_id
-            });
-            return;
-        }
-        
-        // Проверяем, является ли отправитель админом
-        if (!isAdmin(msg.from.id)) {
-            console.log(`⛔ Пользователь ${msg.from.id} не является админом`);
-            await bot.sendMessage(chatId, '❌ У вас нет прав для ответа пользователям.', {
-                reply_to_message_id: msg.message_id
-            });
-            return;
-        }
-        
-        // Получаем данные пользователя
-        const { userId: targetUserId, userName: targetUserName } = userData;
-        
-        console.log(`📨 Админ ${msg.from.first_name} отвечает пользователю ${targetUserName} (${targetUserId})`);
-        
-        // ===== ОТПРАВКА ОТВЕТА ПОЛЬЗОВАТЕЛЮ =====
-        try {
-            if (msg.text) {
-                await bot.sendMessage(targetUserId, 
-                    `📝 <b>Ответ от администратора:</b>\n\n${msg.text}`, {
-                    parse_mode: 'HTML'
-                });
-                console.log(`✅ Текстовый ответ отправлен пользователю ${targetUserId}`);
-            }
-            else if (msg.photo) {
-                const photo = msg.photo[msg.photo.length - 1];
-                await bot.sendPhoto(targetUserId, photo.file_id, {
-                    caption: msg.caption ? `📝 <b>Ответ от администратора:</b>\n\n${msg.caption}` : '📝 <b>Ответ от администратора</b>',
-                    parse_mode: 'HTML'
-                });
-                console.log(`✅ Фото отправлено пользователю ${targetUserId}`);
-            }
-            else if (msg.video) {
-                await bot.sendVideo(targetUserId, msg.video.file_id, {
-                    caption: msg.caption ? `📝 <b>Ответ от администратора:</b>\n\n${msg.caption}` : '📝 <b>Ответ от администратора</b>',
-                    parse_mode: 'HTML'
-                });
-                console.log(`✅ Видео отправлено пользователю ${targetUserId}`);
-            }
-            else if (msg.document) {
-                await bot.sendDocument(targetUserId, msg.document.file_id, {
-                    caption: msg.caption ? `📝 <b>Ответ от администратора:</b>\n\n${msg.caption}` : '📝 <b>Ответ от администратора</b>',
-                    parse_mode: 'HTML'
-                });
-                console.log(`✅ Документ отправлен пользователю ${targetUserId}`);
-            }
-            
-            // Подтверждение админу
-            await bot.sendMessage(chatId, '✅ Ответ успешно отправлен пользователю.', {
-                reply_to_message_id: msg.message_id
-            });
-            
-        } catch (error) {
-            console.error('❌ Ошибка отправки ответа:', error.message);
-            
-            let errorMessage = '❌ Не удалось отправить ответ.';
-            if (error.message.includes('bot was blocked')) {
-                errorMessage = '❌ Пользователь заблокировал бота.';
-            } else if (error.message.includes('chat not found')) {
-                errorMessage = '❌ Пользователь не найден.';
-            }
-            
-            await bot.sendMessage(chatId, errorMessage, {
-                reply_to_message_id: msg.message_id
-            });
-        }
-        
-        return;
-    }
-    
-    // ===== ЕСЛИ СООБЩЕНИЕ ОТ ОБЫЧНОГО ПОЛЬЗОВАТЕЛЯ =====
-    console.log(`💬 Пользователь ${userName} (${userId}) отправил: "${msg.text || 'медиа'}"`);
-    
-    // Сохраняем информацию о пользователе
-    userChats.set(userId, {
-        chatId: chatId,
-        userName: userName,
-        lastMessage: msg.text || 'media',
-        lastMessageTime: new Date().toISOString()
-    });
-    
-    // Формируем ссылку на пользователя
-    const userLink = msg.from.username ? `@${msg.from.username}` : `ID: ${userId}`;
-    
-    // Создаём сообщение для админов
-    let adminMessage = `📩 <b>Новое сообщение от пользователя</b>\n\n` +
-        `👤 <b>Имя:</b> ${userName}\n` +
-        `🔗 <b>Ссылка:</b> ${userLink}\n\n`;
-    
-    if (msg.text) {
-        adminMessage += `💬 <b>Сообщение:</b>\n${msg.text}`;
-    } else if (msg.photo) {
-        adminMessage += `📸 <b>Фото</b>\n${msg.caption ? 'Подпись: ' + msg.caption : ''}`;
-    } else if (msg.video) {
-        adminMessage += `🎥 <b>Видео</b>\n${msg.caption ? 'Подпись: ' + msg.caption : ''}`;
-    } else if (msg.document) {
-        adminMessage += `📎 <b>Документ</b> (${msg.document.file_name})`;
-    } else {
-        adminMessage += `📎 <b>Медиафайл</b>`;
-    }
-    
-    adminMessage += `\n\n<i>👇 Нажмите "Ответить" на это сообщение, чтобы написать пользователю.</i>`;
-    
-    // Отправляем админам
-    try {
-        const sentMsg = await bot.sendMessage(config.adminGroupId, adminMessage, {
-            parse_mode: 'HTML'
-        });
-        
-        // Сохраняем связь для ответа
-        adminReplies.set(sentMsg.message_id, {
-            userId: userId,
-            userName: userName,
-            timestamp: new Date().toISOString()
-        });
-        
-        // Если есть медиа, пересылаем его отдельно
-        if (msg.photo || msg.video || msg.document) {
-            const mediaMsg = await bot.copyMessage(config.adminGroupId, chatId, msg.message_id);
-            adminReplies.set(mediaMsg.message_id, {
-                userId: userId,
-                userName: userName,
-                timestamp: new Date().toISOString()
-            });
-        }
-        
-        // Подтверждение пользователю
-        await bot.sendMessage(chatId, '✅ Ваше сообщение отправлено администратору. Ожидайте ответа.');
-        
-    } catch (error) {
-        console.error('❌ Ошибка пересылки админам:', error.message);
-        await bot.sendMessage(chatId, '❌ Не удалось отправить сообщение. Попробуйте позже.');
+    } else if (data === 'contact_admin') {
+        console.log(`📞 Пользователь ${userName} (${userId}) запросил связь с админом`);
+        await bot.sendMessage(chatId, '📝 Напишите ваш вопрос, я передам администратору.');
     }
 });
 
@@ -289,9 +185,7 @@ app.get('/stats', (req, res) => {
         status: 'ok', 
         uptime: process.uptime(),
         admins: Array.from(adminIds),
-        adminCount: adminIds.size,
-        activeUsers: userChats.size,
-        pendingReplies: adminReplies.size
+        adminCount: adminIds.size
     });
 });
 
@@ -304,38 +198,20 @@ app.listen(config.port, async () => {
     
     const botInfo = await bot.getMe();
     console.log(`🤖 Бот @${botInfo.username} готов к работе!`);
-    console.log(`📢 Ссылка для кнопки: https://t.me/${botInfo.username}?start=help`);
+    console.log(`📢 Ссылка для QR-кода: https://t.me/${botInfo.username}?start=qr`);
+    console.log(`📢 Ссылка для приглашений: https://t.me/${botInfo.username}?start=invite`);
     console.log(`👥 Группа админов ID: ${config.adminGroupId}`);
 });
 
-// ==================== ПЕРИОДИЧЕСКАЯ ОЧИСТКА ====================
-setInterval(async () => {
-    console.log('🔄 Обновление списка админов...');
-    await loadAdminsFromGroup();
-    
-    // Очистка старых записей (старше 24 часов)
-    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
-    let cleaned = 0;
-    
-    for (const [msgId, data] of adminReplies.entries()) {
-        if (new Date(data.timestamp).getTime() < oneDayAgo) {
-            adminReplies.delete(msgId);
-            cleaned++;
-        }
-    }
-    
-    if (cleaned > 0) console.log(`🧹 Очищено ${cleaned} устаревших записей`);
-}, 60 * 60 * 1000);
-
 // ==================== ОБРАБОТКА ЗАВЕРШЕНИЯ ====================
 process.on('SIGINT', () => {
-    console.log('🛑 Останавливаем бота...');
+    console.log('🛑 Получен сигнал завершения, останавливаем бота...');
     bot.stopPolling();
     process.exit();
 });
 
 process.on('SIGTERM', () => {
-    console.log('🛑 Останавливаем бота...');
+    console.log('🛑 Получен сигнал завершения, останавливаем бота...');
     bot.stopPolling();
     process.exit();
 });
